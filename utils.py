@@ -142,16 +142,19 @@ def mutate(tree_in, copy_tree=False, verbose=False, rng=np.random.default_rng())
                     verbose and print(
                         f"{mutate.__name__}(): {ast.Add} -> {type(node.op)}"
                     )
+                    return tree
                 elif type(node.op) is ast.Sub:
                     node.op = rng.choice([ast.Add, ast.Mult])()
                     verbose and print(
                         f"{mutate.__name__}(): {ast.Sub} -> {type(node.op)}"
                     )
+                    return tree
                 elif type(node.op) is ast.Mult:
                     node.op = rng.choice([ast.Add, ast.Sub])()
                     verbose and print(
                         f"{mutate.__name__}(): {ast.Mult} -> {type(node.op)}"
                     )
+                    return tree
 
                 else:
                     raise ValueError(
@@ -200,13 +203,13 @@ def evaluate_tree(tree, a, b):
 
 def score(y_true, y_pred, v=None):
     u = ((y_true - y_pred) ** 2).sum()
+    if u < 0:
+        # in case of overflow
+        return -np.inf
+
     if v is None:
         v = ((y_true - y_true.mean()) ** 2).sum()
-    if 1 - u / v > 1:
-        print("score(): (1 - u / v) > 1:")
-        import code
 
-        code.interact(local=locals())
     return 1 - u / v
 
 
