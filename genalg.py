@@ -80,7 +80,9 @@ def offspring_via_crossover(population, nr_offspring):
     return offspring
 
 
-def kill_and_repopulate(population, percent_kill, percent_elite, percent_mutation):
+def kill_and_repopulate(
+    population, percent_kill, percent_elite, percent_mutation, n_is_inf
+):
     """
     The `percent_elite` percent fittest individuals in `population` survive
     unchanged into the next generation. Of the remaining individuals, the
@@ -93,6 +95,7 @@ def kill_and_repopulate(population, percent_kill, percent_elite, percent_mutatio
 
     nr_elite = int(np.ceil(percent_elite * population_size / 100))
     nr_kill = int(np.ceil(percent_kill * population_size / 100))
+    nr_kill = max(nr_kill, n_is_inf)  # definitely kill all with fitness -inf
     nr_mutation = int(np.ceil(percent_mutation * population_size / 100))
 
     # the elite survive unchanged
@@ -120,6 +123,53 @@ def kill_and_repopulate(population, percent_kill, percent_elite, percent_mutatio
     return population_new
 
 
+def breed(population, selection_probabilities, n_offspring):
+    population_size = len(population)
+    offspring = list()
+    for _ in range(n_offspring):
+        idx_parent_1 = np.random.choice(population_size, 1, p=selection_probabilities)[
+            0
+        ]
+        idx_parent_2 = np.random.choice(population_size, 1, p=selection_probabilities)[
+            0
+        ]
+        parent1 = population[idx_parent_1]
+        parent2 = population[idx_parent_2]
+        offspring.append(ut.crossover(parent1, parent2))
+
+    return offspring
+
+
+def mutations(population, percent_mutation):
+    for tree in population:
+        if np.random.rand() <= percent_mutation / 100:
+            tree = ut.mutate(tree)
+    return population
+
+
+def next_generation(population, percent_elite, percent_mutation):
+    population_size = len(population)
+
+    nr_elite = int(np.ceil(percent_elite * population_size / 100))
+
+    # the elite survive unchanged
+    population_new = population[-nr_elite:]
+
+    selection_probabilities = (np.arange(population_size) + 1) / (
+        population_size * (population_size + 1) / 2
+    )
+
+    offspring = breed(
+        population, selection_probabilities, n_offspring=population_size - nr_elite
+    )
+
+    offspring = mutations(offspring, percent_mutation)
+
+    population_new.extend(offspring)
+
+    return population_new
+
+
 def stats(population, fitness, pm):
     """
     Compute some statistics.
@@ -132,6 +182,7 @@ def stats(population, fitness, pm):
     pm["90%"].append(np.quantile(fitness, 0.9))
     pm["max"].append(np.max(fitness))
 
+    # the best individuals' numbers of Mult nodes
     pm["n_Mult"].append(
         [ut.count_nodes(population[idx], ast.Mult) for idx in range(-3, 0)]
     )
