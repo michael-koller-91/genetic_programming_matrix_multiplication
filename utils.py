@@ -5,6 +5,9 @@ import textwrap
 import numpy as np
 
 
+#
+# AST related helper functions
+#
 class GetSubtree(ast.NodeTransformer):
     def __init__(self):
         super().__init__()
@@ -179,6 +182,32 @@ def tree_to_source(tree):
     Return the source code of the AST `tree`.
     """
     return ast.unparse(ast.fix_missing_locations(tree))
+
+
+#
+# other helper functions
+#
+def evaluate_tree(tree, a, b):
+    """
+    Compile the function given by the AST `tree` and evaluate it at (`a`, `b`).
+    """
+    ast.fix_missing_locations(tree)
+    comp = compile(ast.unparse(tree), "", "exec")
+    loc = {}
+    eval(comp, {}, loc)
+    return loc["f"](*a.flatten(), *b.flatten())
+
+
+def score(y_true, y_pred, v=None):
+    u = ((y_true - y_pred) ** 2).sum()
+    if v is None:
+        v = ((y_true - y_true.mean()) ** 2).sum()
+    if 1 - u / v > 1:
+        print("score(): (1 - u / v) > 1:")
+        import code
+
+        code.interact(local=locals())
+    return 1 - u / v
 
 
 #
