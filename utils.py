@@ -194,8 +194,7 @@ def evaluate_tree(tree, a, b):
     """
     Compile the function given by the AST `tree` and evaluate it at (`a`, `b`).
     """
-    ast.fix_missing_locations(tree)
-    comp = compile(ast.unparse(tree), "", "exec")
+    comp = compile(tree_to_source(tree), "", "exec")
     loc = {}
     eval(comp, {}, loc)
     return loc["f"](*a.flatten(), *b.flatten())

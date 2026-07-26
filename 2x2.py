@@ -18,8 +18,8 @@ percent_elite = 5
 percent_mutation = 5
 
 print_percent = 5
-generations = 3000
-population_size = 250
+generations = 100
+population_size = 25
 max_nodes_per_id = 4
 
 #
@@ -37,7 +37,7 @@ performance_metrics = {
     "90%": list(),
     "max": list(),
     "n_Mult": list(),
-    "mean(time_per_generation)": list(),
+    "mean(time_per_generation [s])": list(),
 }
 
 with open(filename, "w") as fl:
@@ -50,7 +50,7 @@ population = genalg.initialize(
 
 fitness = genalg.calc_fitness(population, a, b, c)
 population, fitness = genalg.sort_by_fitness(population, fitness)
-performance_metrics["mean(time_per_generation)"].append(0)
+performance_metrics["mean(time_per_generation [s])"].append(0)
 performance_metrics["generation"].append(0)
 performance_metrics = genalg.stats(population, fitness, performance_metrics)
 print(pd.DataFrame(performance_metrics))
@@ -79,7 +79,7 @@ for i in range(1, generations + 1):
         performance_metrics = genalg.stats(population, fitness, performance_metrics)
 
         mean_t = time_tot / i
-        performance_metrics["mean(time_per_generation)"].append(mean_t)
+        performance_metrics["mean(time_per_generation [s])"].append(mean_t)
 
         print(pd.DataFrame(performance_metrics))
         print(

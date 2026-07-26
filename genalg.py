@@ -1,21 +1,17 @@
-import ast
-import utils as ut
-import numpy as np
 from random_function import RandomFunctionTree
+import ast
+import numba
+import numpy as np
+import utils as ut
 
 
 def initialize(population_size, max_nodes_per_id):
     """
-    Generate `population_size` random AST with at most `max_nodes_per_id` nodes
-    per return variable.
+    Generate `population_size` random ASTs with at most `max_nodes_per_id`
+    nodes per return variable.
     """
     rft = RandomFunctionTree()
-
-    population = list()
-    for _ in range(population_size):
-        population.append(rft(max_nodes_per_id))
-
-    return population
+    return [rft(max_nodes_per_id) for _ in range(population_size)]
 
 
 def calc_fitness(population, a, b, c_true):
@@ -27,9 +23,17 @@ def calc_fitness(population, a, b, c_true):
 
     fitness = list()
 
+    ns = {"numba": numba}
+    sig = tuple(list(numba.types.int64 for _ in range(np.prod(a.shape) + np.prod(b.shape))))
     for tree in population:
-        c_pred = np.array(ut.evaluate_tree(tree, a, b), dtype=np.int64).reshape(a.shape)
-        fitness.append(ut.score(c_true, c_pred, v))
+        src_code = "@numba.njit\n" + ut.tree_to_source(tree)
+        exec(src_code, ns, ns)
+        f = ns["f"]
+        f.compile(sig)
+        c_pred = np.array(f(*a.flatten(), *b.flatten()), dtype=np.int64).reshape(a.shape)
+        score = ut.score(c_true, c_pred, v)
+        num_multiplications = f.inspect_llvm(sig).count("mul")
+        fitness.append(score + 1 / (num_multiplications + 1))
 
     return np.array(fitness)
 
@@ -49,7 +53,7 @@ def offspring_via_mutation(population, nr_offspring):
         return list()
 
     population_size = len(population)
-    rand_idx = np.random.choice(np.arange(population_size), nr_offspring)
+    rand_idx = np.random.choice(population_size, nr_offspring)
 
     offspring = list()
     for idx in rand_idx:
@@ -126,15 +130,15 @@ def kill_and_repopulate(
 def breed(population, selection_probabilities, n_offspring):
     population_size = len(population)
     offspring = list()
-    for _ in range(n_offspring):
-        idx_parent_1 = np.random.choice(population_size, 1, p=selection_probabilities)[
-            0
-        ]
-        idx_parent_2 = np.random.choice(population_size, 1, p=selection_probabilities)[
-            0
-        ]
-        parent1 = population[idx_parent_1]
-        parent2 = population[idx_parent_2]
+    idx_parent_1 = np.random.choice(
+        population_size, n_offspring, p=selection_probabilities
+    )
+    idx_parent_2 = np.random.choice(
+        population_size, n_offspring, p=selection_probabilities
+    )
+    for idx in range(n_offspring):
+        parent1 = population[idx_parent_1[idx]]
+        parent2 = population[idx_parent_2[idx]]
         offspring.append(ut.crossover(parent1, parent2))
 
     return offspring
