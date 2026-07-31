@@ -48,11 +48,11 @@ population = genalg.initialize(
     population_size=population_size, max_nodes_per_id=max_nodes_per_id
 )
 
-fitness = genalg.calc_fitness(population, a, b, c)
+fitness, score = genalg.calc_fitness(population, a, b, c)
 population, fitness = genalg.sort_by_fitness(population, fitness)
 performance_metrics["mean(time_per_generation [s])"].append(0)
 performance_metrics["generation"].append(0)
-performance_metrics = genalg.stats(population, fitness, performance_metrics)
+performance_metrics = genalg.stats(population, score, performance_metrics)
 print(pd.DataFrame(performance_metrics))
 
 tic_tot = time.time()
@@ -63,12 +63,12 @@ for i in range(1, generations + 1):
     population = genalg.next_generation(
         population, percent_elite=percent_elite, percent_mutation=percent_mutation
     )
-    fitness = genalg.calc_fitness(population, a, b, c)
+    fitness, score = genalg.calc_fitness(population, a, b, c)
     population, fitness = genalg.sort_by_fitness(population, fitness)
     time_tot += time.time() - tic
 
     # should there be a good result, save its source code
-    idx_1p0 = np.abs(fitness - 1.0) < 1e-6
+    idx_1p0 = np.abs(score - 1.0) < 1e-4
     for count, idx in enumerate(idx_1p0):
         if idx is True:
             ut.append_source(filename, ut.tree_to_source(population[count]))
@@ -76,7 +76,7 @@ for i in range(1, generations + 1):
 
     if i % int(print_percent / 100 * generations) == 0:
         performance_metrics["generation"].append(i)
-        performance_metrics = genalg.stats(population, fitness, performance_metrics)
+        performance_metrics = genalg.stats(population, score, performance_metrics)
 
         mean_t = time_tot / i
         performance_metrics["mean(time_per_generation [s])"].append(mean_t)

@@ -22,6 +22,7 @@ def calc_fitness(population, a, b, c_true):
     v = (np.abs(c_true - c_true.mean()) ** 2).sum()
 
     fitness = list()
+    score = list()
 
     ns = {"numba": numba}
     sig = tuple(list(numba.types.int64 for _ in range(np.prod(a.shape) + np.prod(b.shape))))
@@ -31,11 +32,13 @@ def calc_fitness(population, a, b, c_true):
         f = ns["f"]
         f.compile(sig)
         c_pred = np.array(f(*a.flatten(), *b.flatten()), dtype=np.int64).reshape(a.shape)
-        score = ut.score(c_true, c_pred, v)
+        sco = ut.score(c_true, c_pred, v)
         num_multiplications = f.inspect_llvm(sig).count("mul")
-        fitness.append(score + 1 / (num_multiplications + 1))
+        fit = sco + 0.005 * 1 / (num_multiplications + 1)
+        fitness.append(fit)
+        score.append(sco)
 
-    return np.array(fitness)
+    return np.array(fitness), np.array(score)
 
 
 def sort_by_fitness(population, fitness):
