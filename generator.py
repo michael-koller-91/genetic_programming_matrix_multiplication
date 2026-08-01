@@ -108,14 +108,68 @@ def gen_var(letter, dim):
     return np.random.choice([f"{letter}{i+1}" for i in range(dim)])
 
 
-def mutate(m, c):
-    if choose([False, True]):
-        print("mutate m")
-        idx = choose(np.arange(len(m)))
-        var, expr, kind = m[idx]
-        pass
+def change_op(op):
+    if op == "+":
+        return "-"
     else:
-        print("mutate c")
+        return "+"
+
+
+def change_var(var, dim):
+    vars = [f"{var[0]}{i}" for i in range(dim)]
+    opt1, opt2 = choose(vars, 2)
+    print(opt1, opt2, var)
+    if opt1 == var:
+        return opt2
+    else:
+        return opt1
+
+
+def mutate(m, c):
+    dim = len(c)
+    if False:  # choose([False, True]):
+        idx = choose(np.arange(len(m)))
+        _, expr, kind = m[idx]
+        if kind == 1:
+            if choose([False, True]):  # left
+                expr[0] = change_var(expr[0], dim)
+            else:  # right
+                expr[2] = change_var(expr[2], dim)
+        elif kind == 2:
+            what = choose([1, 2, 3, 4])
+            if what == 1:  # a_left
+                expr[1] = change_var(expr[1], dim)
+            elif what == 2:  # operator
+                expr[2] = change_op(expr[2])
+            elif what == 3:  # a_right
+                expr[3] = change_var(expr[3], dim)
+            elif what == 4:  # b
+                expr[6] = change_var(expr[6], dim)
+        elif kind == 3:
+            what = choose([1, 2, 3, 4])
+            if what == 1:  # a
+                expr[0] = change_var(expr[0], dim)
+            elif what == 2:  # b_left
+                expr[3] = change_var(expr[3], dim)
+            elif what == 3:  # operator
+                expr[4] = change_op(expr[4])
+            elif what == 4:  # b_right
+                expr[5] = change_var(expr[5], dim)
+        elif kind == 4:
+            what = choose([1, 2, 3, 4, 5, 6])
+            if what == 1:  # a_left
+                expr[1] = change_var(expr[1], dim)
+            elif what == 2:  # operator
+                expr[2] = change_op(expr[2])
+            elif what == 3:  # a_right
+                expr[3] = change_var(expr[3], dim)
+            elif what == 4:  # b_left
+                expr[7] = change_var(expr[7], dim)
+            elif what == 5:  # operator
+                expr[8] = change_op(expr[8])
+            elif what == 6:  # b_right
+                expr[9] = change_var(expr[9], dim)
+    else:
         pass
 
     return m, c
@@ -214,16 +268,16 @@ def main():
         # for cs in csubs:
         #     print(cs)
 
-        # print("-" * 10)
-        # m = gen_m(i, dim)
-        # c = gen_c(m, dim)
-        # func = gen_func(m, c)
-        # print(func)
-        # print(evaluate(func, 1, 2, 3, 4, 5, 6))
-        # m, c = mutate(m, c)
-        # func = gen_func(m, c)
-        # print(func)
-        # print(evaluate(func, 1, 2, 3, 4, 5, 6))
+        print("-" * 10)
+        m = gen_m(i, dim)
+        c = gen_c(m, dim)
+        func = gen_func(m, c)
+        print(func)
+        print(evaluate(func, 1, 2, 3, 4, 5, 6))
+        m, c = mutate(m, c)
+        func = gen_func(m, c)
+        print(func)
+        print(evaluate(func, 1, 2, 3, 4, 5, 6))
 
 
 if __name__ == "__main__":
