@@ -52,6 +52,27 @@ def evaluate(func, *args):
     return loc["f"](*args)
 
 
+def fitness(m, c, cref):
+    """
+    Compute the fitness of all elements of `c` and the length of `m` which is
+    the number of multiplications
+    """
+    csubs = substitute(m, c)
+    fs = np.zeros(len(c))
+    for i in range(len(cref)):
+        fs[i] = fitness_one_c(csubs[i], cref[i])
+    score = np.sum(1 / fs) + 1 / (len(m) + 1)
+    return fs, len(m), score
+
+
+def fitness_one_c(csubs, cref):
+    """
+    How many operators are left when computing the difference `csubs - cref`.
+    """
+    eq = simplify(f"{csubs} - ({cref})")
+    return 1 / (eq.count_ops() + 1)
+
+
 def gen_one_c(m):
     vars_m = [f"m{i}" for i in range(len(m))]
     num_operands = np.random.randint(1, len(m) + 1)
@@ -255,6 +276,9 @@ def mutate_m(m, dim):
 
 
 def substitute(m, c):
+    """
+    Plug all m-equations into c-equations.
+    """
     csubs = list()
     for _, m_ in c:
         # e.g., m_ = ['m0', '-', 'm2']
@@ -269,9 +293,28 @@ def substitute(m, c):
     return csubs
 
 
+def test_fitness_one_c():
+    print("  test_fitness_one_c()", end="", flush=True)
+    csubs = "a0*b0+a2*b1"
+    cref = "a0*b0+a2*b1"
+    f_got = fitness_one_c(csubs, cref)
+    f_exp = 1 / (0 + 1)
+    assert f_got == f_exp, f"Got fitness {f_got} but expected {f_exp}."
+    csubs = "a0*b0+a2*b1"
+    cref = "a0*b0-a2*b1"
+    f_got = fitness_one_c(csubs, cref)
+    f_exp = 1 / (2 + 1)
+    assert f_got == f_exp, f"Got fitness {f_got} but expected {f_exp}."
+    csubs = "a0*b0-a2*b1"
+    cref = "a0*b0+a2*b1"
+    f_got = fitness_one_c(csubs, cref)
+    f_exp = 1 / (3 + 1)
+    assert f_got == f_exp, f"Got fitness {f_got} but expected {f_exp}."
+    print("\r✓ test_fitness_one_c()")
+
+
 def test_gen_mat_equations():
     print("  test_gen_mat_equations()", end="", flush=True)
-
     dim = 2
     matc = gen_mat_equations(dim)[0]
     # [a0 , a1] [b0 , b1] = [a0 * b0 + a1 * b2 , a0 * b1 + a1 * b3]
@@ -379,19 +422,27 @@ def main():
         # c_child = cross_c(c_mom, c_dad)
         # print("c_child", c_child)
 
-        print("-" * 10)
-        i_dad, i_mom = choose(np.arange(2, 5), 2)
-        m_dad = gen_m(i_dad, dim)
-        print("m_dad", m_dad)
-        m_mom = gen_m(i_mom, dim)
-        print("m_mom", m_mom)
-        m_child = cross_m(m_dad, m_mom)
-        print("m_child", m_child)
+        # print("-" * 10)
+        # i_dad, i_mom = choose(np.arange(2, 5), 2)
+        # m_dad = gen_m(i_dad, dim)
+        # print("m_dad", m_dad)
+        # m_mom = gen_m(i_mom, dim)
+        # print("m_mom", m_mom)
+        # m_child = cross_m(m_dad, m_mom)
+        # print("m_child", m_child)
+
+        # print("-" * 10)
+        # m = gen_m(i, dim)
+        # c = gen_c(m, dim)
+        # csubs = substitute(m, c)
+        # mat_eq = gen_mat_equations(dim)[1]
+        # for i, cs in enumerate(csubs):
+        #     print(fitness_one_c(cs, mat_eq[i]))
 
 
 if __name__ == "__main__":
+    test_fitness_one_c()
     test_gen_mat_equations()
     test_simplify()
     test_substitute()
-    print(gen_mat_equations(2))
     main()
