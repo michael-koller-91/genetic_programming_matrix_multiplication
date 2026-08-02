@@ -79,7 +79,7 @@ def gen_m(num_mult, dim):
 
     m = list()
     for i in range(num_mult):
-        kind = np.random.choice([1, 2, 3, 4])
+        kind = choose([1, 2, 3, 4])
         if kind == 1:
             left = choose(vars_a)
             right = choose(vars_b)
@@ -105,7 +105,7 @@ def gen_m(num_mult, dim):
 
 
 def gen_var(letter, dim):
-    return np.random.choice([f"{letter}{i+1}" for i in range(dim)])
+    return choose([f"{letter}{i+1}" for i in range(dim)])
 
 
 def change_op(op):
@@ -130,18 +130,23 @@ def mutate_c(c, num_mult):
     In an equation like `m1 + m3 - m4`, either change one of the variable's
     index or switch between `+` and `-`.
     """
-    idx = choose(np.arange(len(c)))  # choose one of c0, c1, c2, ...
+    idx, j = choose(np.arange(len(c)), 2)  # choose two of c0, c1, c2, ...
     _, eq = c[idx]
-    if len(eq) == 1:  # there is only one variable
-        c[idx][1][0] = change_var(eq[0], num_mult)
+    kind = choose([1, 2, 3])
+    if kind == 1:  # switch `ci` and `cj`
+        vari, eqi = c[idx]
+        varj, eqj = c[j]
+        c[idx] = [vari, eqj]
+        c[j] = [varj, eqi]
         return c
-    if (len(eq) == 2 * num_mult - 1) or choose([False, True]):  # change operator
-        num_ops = len(eq) // 2
-        op_idx = choose(np.arange(num_ops)) * 2 + 1
-        eq[op_idx] = change_op(eq[op_idx])
-        c[idx][1] = eq
-        return c
-    else:  # change variable
+    elif kind == 2:  # change a variable
+        # if every variable is already used, we change an operator
+        if len(eq) == 2 * num_mult - 1:
+            num_ops = len(eq) // 2
+            op_idx = choose(np.arange(num_ops)) * 2 + 1
+            eq[op_idx] = change_op(eq[op_idx])
+            c[idx][1] = eq
+            return c
         num_vars = len(eq) // 2 + 1
         var_idx = choose(np.arange(num_vars)) * 2
         allowed_indices = np.ones(num_mult, dtype=bool)
@@ -149,6 +154,16 @@ def mutate_c(c, num_mult):
             allowed_indices[int(eq[2 * i][1:])] = False
         m_new = f"m{choose(np.arange(num_mult)[allowed_indices])}"
         eq[var_idx] = m_new
+        c[idx][1] = eq
+        return c
+    elif kind == 3:  # change an operator
+        if len(eq) == 1:  # there is no operator
+            # if there is no operator, we change the one variable
+            c[idx][1][0] = change_var(eq[0], num_mult)
+            return c
+        num_ops = len(eq) // 2
+        op_idx = choose(np.arange(num_ops)) * 2 + 1
+        eq[op_idx] = change_op(eq[op_idx])
         c[idx][1] = eq
         return c
 
