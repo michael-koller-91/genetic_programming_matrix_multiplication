@@ -8,6 +8,43 @@ def choose(*args, **kwargs):
     return np.random.choice(*args, **kwargs, replace=False)
 
 
+def cross_c(c_dad, c_mom):
+    """
+    Choose half of the c-equations from dad and the other half from mom.
+    """
+    indices = np.ones(len(c_dad), dtype=bool)
+    falses = choose(np.arange(len(c_dad)), len(c_dad) // 2)
+    indices[falses] = False
+    c_child = list()
+    for i in range(len(c_dad)):
+        if indices[i]:
+            c_child.append(c_dad[i])
+        else:
+            c_child.append(c_mom[i])
+    return c_child
+
+
+def cross_m(m_dad, m_mom):
+    """
+    The child has a number of multiplications between dad's and mom's numbers.
+    The equations randomly come from either parent.
+    """
+    m_concat = [*m_dad, *m_mom]
+    np.random.shuffle(m_concat)
+
+    num_mult_dad = len(m_dad)
+    num_mult_mom = len(m_mom)
+    num_mult_min = min(num_mult_dad, num_mult_mom)
+    num_mult_max = max(num_mult_dad, num_mult_mom)
+    num_mult_child = choose(np.arange(num_mult_min, num_mult_max + 1))
+
+    m_child = list()
+    for i in range(num_mult_child):
+        _, eq, kind = m_concat[i]
+        m_child.append([f"m{i}", eq, kind])
+    return m_child
+
+
 def evaluate(func, *args):
     comp = compile(func, "", "exec")
     loc = {}
@@ -331,6 +368,25 @@ def main():
         # func = gen_func(m, c)
         # print(func)
         # print(evaluate(func, 1, 2, 3, 4, 5, 6))
+
+        # print("-" * 10)
+        # m_dad = gen_m(i, dim)
+        # c_dad = gen_c(m_dad, dim)
+        # print("c_dad", c_dad)
+        # m_mom = gen_m(i, dim)
+        # c_mom = gen_c(m_mom, dim)
+        # print("c_mom", c_mom)
+        # c_child = cross_c(c_mom, c_dad)
+        # print("c_child", c_child)
+
+        print("-" * 10)
+        i_dad, i_mom = choose(np.arange(2, 5), 2)
+        m_dad = gen_m(i_dad, dim)
+        print("m_dad", m_dad)
+        m_mom = gen_m(i_mom, dim)
+        print("m_mom", m_mom)
+        m_child = cross_m(m_dad, m_mom)
+        print("m_child", m_child)
 
 
 if __name__ == "__main__":
