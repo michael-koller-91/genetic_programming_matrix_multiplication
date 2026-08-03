@@ -4,6 +4,36 @@ import numpy as np
 ADD_SUB = ["+", "-"]
 
 
+def breed(population, selection_probabilities, n_offspring):
+    population_size = len(population)
+    offspring = list()
+    idx_dad = choose(population_size, n_offspring, p=selection_probabilities)
+    idx_mom = choose(population_size, n_offspring, p=selection_probabilities)
+    for idx in range(n_offspring):
+        dad = population[idx_dad[idx]]
+        mom = population[idx_mom[idx]]
+        c_child = cross_c(dad["c"], mom["c"])
+        m_child = cross_m(dad["m"], mom["m"])
+        offspring.append({"c": c_child, "m": m_child})
+    return offspring
+
+
+def change_var(var, dim):
+    vars = [f"{var[0]}{i}" for i in range(dim)]
+    opt1, opt2 = choose(vars, 2)
+    if opt1 == var:
+        return opt2
+    else:
+        return opt1
+
+
+def change_op(op):
+    if op == "+":
+        return "-"
+    else:
+        return "+"
+
+
 def choose(*args, **kwargs):
     return np.random.choice(*args, **kwargs, replace=False)
 
@@ -58,11 +88,11 @@ def fitness(m, c, cref):
     the number of multiplications
     """
     csubs = substitute(m, c)
-    fs = np.zeros(len(c))
+    ftnss = np.zeros(len(c))
     for i in range(len(cref)):
-        fs[i] = fitness_one_c(csubs[i], cref[i])
-    score = np.sum(1 / fs) + 1 / (len(m) + 1)
-    return fs, len(m), score
+        ftnss[i] = fitness_one_c(csubs[i], cref[i])
+    score = np.sum(ftnss) / len(c) + 1 / (len(m) + 1)
+    return ftnss, len(m), score
 
 
 def fitness_one_c(csubs, cref):
@@ -73,39 +103,11 @@ def fitness_one_c(csubs, cref):
     return 1 / (eq.count_ops() + 1)
 
 
-def gen_one_c(m):
-    vars_m = [f"m{i}" for i in range(len(m))]
-    num_operands = np.random.randint(1, len(m) + 1)
-    operands = choose(vars_m, num_operands)
-    c = [operands[0]]
-    if num_operands > 1:
-        for i in range(1, num_operands):
-            op = choose(ADD_SUB)
-            c.append(op)
-            c.append(operands[i])
-    return c
-
-
-def gen_c(m, dim):
+def gen_c(m, num_vars):
     c = list()
-    for i in range(dim):
+    for i in range(num_vars):
         c.append([f"_c{i}", gen_one_c(m)])
     return c
-
-
-def gen_mat_equations(dim):
-    mata = [[f"a{i+j*dim}" for i in range(dim)] for j in range(dim)]
-    matb = [[f"b{i+j*dim}" for i in range(dim)] for j in range(dim)]
-    matc = list()
-    for row in range(dim):
-        matc.append(list())
-        for col in range(dim):
-            matc[row].append("")
-            for i in range(dim):
-                matc[row][col] += mata[row][i] + "*" + matb[i][col]
-                if i + 1 < dim:
-                    matc[row][col] += "+"
-    return matc, [element for row in matc for element in row]
 
 
 def gen_func(m, c):
@@ -131,9 +133,15 @@ def gen_func(m, c):
     return func
 
 
-def gen_m(num_mult, dim):
-    vars_a = [f"a{i}" for i in range(dim)]
-    vars_b = [f"b{i}" for i in range(dim)]
+def gen_individual(min_num_mult, max_num_mult, dim):
+    m = gen_m(np.random.randint(min_num_mult, max_num_mult + 1), dim)
+    c = gen_c(m, dim)
+    return {"m": m, "c": c}
+
+
+def gen_m(num_mult, num_vars):
+    vars_a = [f"a{i}" for i in range(num_vars)]
+    vars_b = [f"b{i}" for i in range(num_vars)]
 
     m = list()
     for i in range(num_mult):
@@ -162,25 +170,46 @@ def gen_m(num_mult, dim):
     return m
 
 
+def gen_mat_equations(dim):
+    mata = [[f"a{i+j*dim}" for i in range(dim)] for j in range(dim)]
+    matb = [[f"b{i+j*dim}" for i in range(dim)] for j in range(dim)]
+    matc = list()
+    for row in range(dim):
+        matc.append(list())
+        for col in range(dim):
+            matc[row].append("")
+            for i in range(dim):
+                matc[row][col] += mata[row][i] + "*" + matb[i][col]
+                if i + 1 < dim:
+                    matc[row][col] += "+"
+    return matc, [element for row in matc for element in row]
+
+
+def gen_one_c(m):
+    vars_m = [f"m{i}" for i in range(len(m))]
+    num_operands = np.random.randint(1, len(m) + 1)
+    operands = choose(vars_m, num_operands)
+    c = [operands[0]]
+    if num_operands > 1:
+        for i in range(1, num_operands):
+            op = choose(ADD_SUB)
+            c.append(op)
+            c.append(operands[i])
+    return c
+
+
 def gen_var(letter, dim):
     return choose([f"{letter}{i+1}" for i in range(dim)])
 
 
-def change_op(op):
-    if op == "+":
-        return "-"
-    else:
-        return "+"
-
-
-def change_var(var, dim):
-    vars = [f"{var[0]}{i}" for i in range(dim)]
-    opt1, opt2 = choose(vars, 2)
-    print(opt1, opt2, var)
-    if opt1 == var:
-        return opt2
-    else:
-        return opt1
+def mutate(population, percent_mutation, num_vars):
+    for individual in population:
+        if np.random.rand() <= percent_mutation / 100:
+            m_mut = mutate_m(individual["m"], num_vars)
+            c_mut = mutate_c(individual["c"], num_vars)
+            individual["c"] = c_mut
+            individual["m"] = m_mut
+    return population
 
 
 def mutate_c(c, num_mult):
@@ -275,6 +304,77 @@ def mutate_m(m, dim):
     return m
 
 
+def next_generation(population, percent_elite, percent_mutation, num_vars):
+    population_size = len(population)
+
+    nr_elite = int(np.ceil(percent_elite * population_size / 100))
+
+    # the elite survive unchanged
+    population_new = population[-nr_elite:]
+
+    selection_probabilities = (np.arange(population_size) + 1) / (
+        population_size * (population_size + 1) / 2
+    )
+
+    offspring = breed(
+        population, selection_probabilities, n_offspring=population_size - nr_elite
+    )
+
+    offspring = mutate(offspring, percent_mutation, num_vars)
+
+    population_new.extend(offspring)
+
+    return population_new
+
+
+def population_fitness(population, cref):
+    population_size = len(population)
+
+    ftnss = np.zeros((population_size, len(population[0]["c"])))
+    num_mults = np.zeros(population_size, dtype=int)
+    scores = np.zeros(population_size)
+    for i, individual in enumerate(population):
+        ftnss_i, num_mult_i, score_i = fitness(individual["m"], individual["c"], cref)
+        ftnss[i, :] = ftnss_i
+        num_mults[i] = num_mult_i
+        scores[i] = score_i
+    return ftnss, np.sum(ftnss, axis=1) / len(cref), num_mults, scores
+
+
+def population_init(population_size, min_num_mult, max_num_mult, dim):
+    return [
+        gen_individual(min_num_mult, max_num_mult, dim) for _ in range(population_size)
+    ]
+
+
+def sort_by(by, population, num_mults):
+    idx_sorted = np.argsort(by)
+    return (
+        [population[idx] for idx in idx_sorted],
+        by[idx_sorted],
+        num_mults[idx_sorted],
+        idx_sorted,
+    )
+
+
+def stats(scores, num_mults, pm):
+    """
+    Compute some statistics.
+    """
+    scores = np.array(scores)
+
+    pm["min"].append(np.min(scores))
+    pm["10%"].append(np.quantile(scores, 0.1))
+    pm["mean"].append(np.mean(scores))
+    pm["90%"].append(np.quantile(scores, 0.9))
+    pm["max"].append(np.max(scores))
+
+    # the best individuals' numbers of Mult nodes
+    pm["num_mult"].append(num_mults[-3:])
+
+    return pm
+
+
 def substitute(m, c):
     """
     Plug all m-equations into c-equations.
@@ -291,6 +391,9 @@ def substitute(m, c):
                 s += mi
         csubs.append(s)
     return csubs
+
+
+###########################################################################
 
 
 def test_fitness_one_c():
@@ -374,8 +477,7 @@ def test_substitute():
     print("\r✓ test_substitute()")
 
 
-###########################################################################
-def main():
+def playground():
     dim = 3
     for i in range(dim, 10):
         pass
@@ -445,4 +547,4 @@ if __name__ == "__main__":
     test_gen_mat_equations()
     test_simplify()
     test_substitute()
-    main()
+    playground()
