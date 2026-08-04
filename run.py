@@ -14,8 +14,7 @@ def run(args):
 
     dim = 2
     generations = 10
-    max_num_mult = dim**3
-    min_num_mult = dim**2
+    num_mult = dim**3
     num_vars = dim**2
     percent_elite = 5
     percent_mutation = 5
@@ -29,8 +28,7 @@ def run(args):
     if not args.noresult:
         with open(filename, "w") as f:
             f.write(f"dim: {dim}")
-            f.write(f"max_num_mult: {max_num_mult}")
-            f.write(f"min_num_mult: {min_num_mult}")
+            f.write(f"num_mult: {num_mult}")
             f.write(f"num_vars: {num_vars}")
             f.write(f"population_size: {population_size}")
             f.write(f"seed: {seed}")
@@ -48,9 +46,7 @@ def run(args):
 
     cref = genetics.gen_mat_equations(dim)[1]
 
-    population = genetics.population_init(
-        population_size, min_num_mult, max_num_mult, num_vars
-    )
+    population = genetics.population_init(population_size, num_mult, num_vars)
     _, _, num_mults, scores = genetics.population_fitness(population, cref)
 
     population, scores, num_mults, _ = genetics.sort_by(scores, population, num_mults)
@@ -64,16 +60,19 @@ def run(args):
     appended_to_file = False
     for i in range(1, generations + 1):
         tic = time.time()
-        population = genetics.next_generation(
+        population = genetics.next_gen(
             population,
             percent_elite=percent_elite,
             percent_mutation=percent_mutation,
             num_vars=num_vars,
+            num_mult=num_mult,
         )
         _, _, num_mults, scores = genetics.population_fitness(population, cref)
         population, scores, num_mults, _ = genetics.sort_by(
             scores, population, num_mults
         )
+        toc = time.time()
+        print(toc - tic)
         time_tot += time.time() - tic
 
         if i % int(np.ceil(print_percent / 100 * generations)) == 0:

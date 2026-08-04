@@ -1,3 +1,6 @@
 black
+ipython
 numpy
+pandas
 sympy
+tqdm

@@ -1,4 +1,5 @@
 from sympy import simplify
+from tqdm import tqdm
 import numpy as np
 
 ADD_SUB = ["+", "-"]
@@ -38,6 +39,18 @@ def choose(*args, **kwargs):
     return np.random.choice(*args, **kwargs, replace=False)
 
 
+def count_mult(c, num_m_vars):
+    """
+    Count how many different m-variables occur in all c-equations.
+    """
+    ms = np.zeros(num_m_vars, dtype=bool)
+    for ci in c:
+        for m in ci[1][::2]:
+            i = int(m[1:])
+            ms[i] = True
+    return np.sum(ms)
+
+
 def cross_c(c_dad, c_mom):
     """
     Choose half of the c-equations from dad and the other half from mom.
@@ -56,22 +69,18 @@ def cross_c(c_dad, c_mom):
 
 def cross_m(m_dad, m_mom):
     """
-    The child has a number of multiplications between dad's and mom's numbers.
-    The equations randomly come from either parent.
+    Choose half of the m-equations from dad and the other half from mom.
     """
-    m_concat = [*m_dad, *m_mom]
-    np.random.shuffle(m_concat)
-
-    num_mult_dad = len(m_dad)
-    num_mult_mom = len(m_mom)
-    num_mult_min = min(num_mult_dad, num_mult_mom)
-    num_mult_max = max(num_mult_dad, num_mult_mom)
-    num_mult_child = choose(np.arange(num_mult_min, num_mult_max + 1))
-
+    indices = np.ones(len(m_dad), dtype=bool)
+    falses = choose(np.arange(len(m_dad)), len(m_dad) // 2)
+    indices[falses] = False
     m_child = list()
-    for i in range(num_mult_child):
-        _, eq, kind = m_concat[i]
-        m_child.append([f"m{i}", eq, kind])
+    for i in range(len(m_dad)):
+        var = f"m{i}"
+        if indices[i]:
+            m_child.append([var, *m_dad[i][1:]])
+        else:
+            m_child.append([var, *m_mom[i][1:]])
     return m_child
 
 
@@ -92,7 +101,8 @@ def fitness(m, c, cref):
     for i in range(len(cref)):
         ftnss[i] = fitness_one_c(csubs[i], cref[i])
     score = np.sum(ftnss) / len(c) + 1 / (len(m) + 1)
-    return ftnss, len(m), score
+    num_mult = count_mult(c, len(m))
+    return ftnss, num_mult, score
 
 
 def fitness_one_c(csubs, cref):
@@ -133,8 +143,8 @@ def gen_func(m, c):
     return func
 
 
-def gen_individual(min_num_mult, max_num_mult, dim):
-    m = gen_m(np.random.randint(min_num_mult, max_num_mult + 1), dim)
+def gen_individual(num_mult, dim):
+    m = gen_m(num_mult, dim)
     c = gen_c(m, dim)
     return {"m": m, "c": c}
 
@@ -202,11 +212,11 @@ def gen_var(letter, dim):
     return choose([f"{letter}{i+1}" for i in range(dim)])
 
 
-def mutate(population, percent_mutation, num_vars):
+def mutate(population, percent_mutation, num_vars, num_mult):
     for individual in population:
         if np.random.rand() <= percent_mutation / 100:
             m_mut = mutate_m(individual["m"], num_vars)
-            c_mut = mutate_c(individual["c"], num_vars)
+            c_mut = mutate_c(individual["c"], num_mult)
             individual["c"] = c_mut
             individual["m"] = m_mut
     return population
@@ -304,7 +314,7 @@ def mutate_m(m, dim):
     return m
 
 
-def next_generation(population, percent_elite, percent_mutation, num_vars):
+def next_gen(population, percent_elite, percent_mutation, num_vars, num_mult):
     population_size = len(population)
 
     nr_elite = int(np.ceil(percent_elite * population_size / 100))
@@ -320,7 +330,7 @@ def next_generation(population, percent_elite, percent_mutation, num_vars):
         population, selection_probabilities, n_offspring=population_size - nr_elite
     )
 
-    offspring = mutate(offspring, percent_mutation, num_vars)
+    offspring = mutate(offspring, percent_mutation, num_vars, num_mult)
 
     population_new.extend(offspring)
 
@@ -333,7 +343,7 @@ def population_fitness(population, cref):
     ftnss = np.zeros((population_size, len(population[0]["c"])))
     num_mults = np.zeros(population_size, dtype=int)
     scores = np.zeros(population_size)
-    for i, individual in enumerate(population):
+    for i, individual in enumerate(tqdm(population, ncols=50)):
         ftnss_i, num_mult_i, score_i = fitness(individual["m"], individual["c"], cref)
         ftnss[i, :] = ftnss_i
         num_mults[i] = num_mult_i
@@ -341,10 +351,8 @@ def population_fitness(population, cref):
     return ftnss, np.sum(ftnss, axis=1) / len(cref), num_mults, scores
 
 
-def population_init(population_size, min_num_mult, max_num_mult, dim):
-    return [
-        gen_individual(min_num_mult, max_num_mult, dim) for _ in range(population_size)
-    ]
+def population_init(population_size, num_mult, dim):
+    return [gen_individual(num_mult, dim) for _ in range(population_size)]
 
 
 def sort_by(by, population, num_mults):
@@ -479,6 +487,18 @@ def test_substitute():
 
 def playground():
     dim = 3
+    m_dad = gen_m(dim**2, dim)
+    m_mom = gen_m(dim**2, dim)
+    m_child = cross_m(m_dad, m_mom)
+    print("m_dad:")
+    for m in m_dad:
+        print("  ", m)
+    print("m_mom:")
+    for m in m_mom:
+        print("  ", m)
+    print("m_child:")
+    for m in m_child:
+        print("  ", m)
     for i in range(dim, 10):
         pass
         # m = gen_m(i, dim)
