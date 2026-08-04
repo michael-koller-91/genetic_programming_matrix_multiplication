@@ -1,3 +1,4 @@
+from copy import deepcopy
 from sympy import simplify
 from tqdm import tqdm
 import numpy as np
@@ -8,8 +9,8 @@ ADD_SUB = ["+", "-"]
 def breed(population, selection_probabilities, n_offspring):
     population_size = len(population)
     offspring = list()
-    idx_dad = choose(population_size, n_offspring, p=selection_probabilities)
-    idx_mom = choose(population_size, n_offspring, p=selection_probabilities)
+    idx_dad = np.random.choice(population_size, n_offspring, p=selection_probabilities)
+    idx_mom = np.random.choice(population_size, n_offspring, p=selection_probabilities)
     for idx in range(n_offspring):
         dad = population[idx_dad[idx]]
         mom = population[idx_mom[idx]]
@@ -217,8 +218,8 @@ def mutate(population, percent_mutation, num_vars, num_mult):
         if np.random.rand() <= percent_mutation / 100:
             m_mut = mutate_m(individual["m"], num_vars)
             c_mut = mutate_c(individual["c"], num_mult)
-            individual["c"] = c_mut
             individual["m"] = m_mut
+            individual["c"] = c_mut
     return population
 
 
@@ -320,14 +321,16 @@ def next_gen(population, percent_elite, percent_mutation, num_vars, num_mult):
     nr_elite = int(np.ceil(percent_elite * population_size / 100))
 
     # the elite survive unchanged
-    population_new = population[-nr_elite:]
+    population_new = deepcopy(population[-nr_elite:])
 
     selection_probabilities = (np.arange(population_size) + 1) / (
         population_size * (population_size + 1) / 2
     )
 
     offspring = breed(
-        population, selection_probabilities, n_offspring=population_size - nr_elite
+        population,
+        selection_probabilities,
+        n_offspring=population_size - nr_elite,
     )
 
     offspring = mutate(offspring, percent_mutation, num_vars, num_mult)
@@ -358,8 +361,8 @@ def population_init(population_size, num_mult, dim):
 def sort_by(by, population, num_mults):
     idx_sorted = np.argsort(by)
     return (
-        [population[idx] for idx in idx_sorted],
         by[idx_sorted],
+        [population[idx] for idx in idx_sorted],
         num_mults[idx_sorted],
         idx_sorted,
     )

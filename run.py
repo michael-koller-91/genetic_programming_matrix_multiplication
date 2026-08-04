@@ -13,13 +13,22 @@ def run(args):
     np.random.default_rng(seed)
 
     dim = 2
-    generations = 10
+    generations = 100
     num_mult = dim**3
     num_vars = dim**2
     percent_elite = 5
     percent_mutation = 5
-    population_size = 100
+    population_size = 50
     print_percent = 5
+
+    print("dim =", dim)
+    print("generations =", generations)
+    print("num_mult =", num_mult)
+    print("num_vars =", num_vars)
+    print("percent_elite =", percent_elite)
+    print("percent_mutation =", percent_mutation)
+    print("population_size =", population_size)
+    print("print_percent =", print_percent)
 
     date = dt.datetime.strftime(dt.datetime.now(), "%Y-%M-%d_%Hh%Mm%Ss")
     filename = os.path.join("results", date + ".txt")
@@ -49,7 +58,7 @@ def run(args):
     population = genetics.population_init(population_size, num_mult, num_vars)
     _, _, num_mults, scores = genetics.population_fitness(population, cref)
 
-    population, scores, num_mults, _ = genetics.sort_by(scores, population, num_mults)
+    scores, population, num_mults, _ = genetics.sort_by(scores, population, num_mults)
     perf_metrics["mean(time_per_generation [s])"].append(0)
     perf_metrics["generation"].append(0)
     perf_metrics = genetics.stats(scores, num_mults, perf_metrics)
@@ -68,11 +77,9 @@ def run(args):
             num_mult=num_mult,
         )
         _, _, num_mults, scores = genetics.population_fitness(population, cref)
-        population, scores, num_mults, _ = genetics.sort_by(
+        scores, population, num_mults, _ = genetics.sort_by(
             scores, population, num_mults
         )
-        toc = time.time()
-        print(toc - tic)
         time_tot += time.time() - tic
 
         if i % int(np.ceil(print_percent / 100 * generations)) == 0:
