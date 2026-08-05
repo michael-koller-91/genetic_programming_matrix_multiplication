@@ -1,6 +1,7 @@
+# from concurrent.futures import ProcessPoolExecutor
 from copy import deepcopy
+# from functools import partial
 from sympy import simplify
-from tqdm import tqdm
 import numpy as np
 
 ADD_SUB = ["+", "-"]
@@ -92,7 +93,7 @@ def evaluate(func, *args):
     return loc["f"](*args)
 
 
-def fitness(m, c, cref):
+def fitness(m, c, cref, beta):
     """
     Compute the fitness of all elements of `c` and the length of `m` which is
     the number of multiplications
@@ -101,7 +102,7 @@ def fitness(m, c, cref):
     ftnss = np.zeros(len(c))
     for i in range(len(cref)):
         ftnss[i] = fitness_one_c(csubs[i], cref[i])
-    score = np.sum(ftnss) / len(c) + 1 / (len(m) + 1)
+    score = np.sum(ftnss) / len(c) + beta / (len(m) + 1)
     num_mult = count_mult(c, len(m))
     return ftnss, num_mult, score
 
@@ -225,12 +226,14 @@ def mutate(population, percent_mutation, num_vars, num_mult):
 
 def mutate_c(c, num_mult):
     """
-    In an equation like `m1 + m3 - m4`, either change one of the variable's
-    index or switch between `+` and `-`.
+    Either swap two equations `ci`, `cj` or in an equation like `m1 + m3 - m4`,
+    * either change one of the variable's index or
+    * switch between `+` and `-` or
+    * add a new term
     """
     idx, j = choose(np.arange(len(c)), 2)  # choose two of c0, c1, c2, ...
     _, eq = c[idx]
-    kind = choose([1, 2, 3])
+    kind = choose([1, 2, 3, 4])
     if kind == 1:  # switch `ci` and `cj`
         vari, eqi = c[idx]
         varj, eqj = c[j]
@@ -263,6 +266,28 @@ def mutate_c(c, num_mult):
         op_idx = choose(np.arange(num_ops)) * 2 + 1
         eq[op_idx] = change_op(eq[op_idx])
         c[idx][1] = eq
+        return c
+    elif kind == 4:  # add a variable
+        if len(eq) == 2 * num_mult - 1:  # all `mi` are already present
+            # see if maybe `c[j]` does not use all `mi`
+            idx = j
+            _, eq = c[idx]
+            if len(eq) == 2 * num_mult - 1:  # `c[j]` also uses all `mi`
+                # then at least change an operator
+                num_ops = num_mult - 1
+                op_idx = choose(np.arange(num_ops)) * 2 + 1
+                eq[op_idx] = change_op(eq[op_idx])
+                c[idx][1] = eq
+                return c
+        # at this point, we're either changing `c[idx]` or `c[j]` via `eq`
+        num_vars = len(eq) // 2 + 1
+        allowed_indices = np.ones(num_mult, dtype=bool)
+        for i in range(num_vars):
+            allowed_indices[int(eq[2 * i][1:])] = False
+        m_new = f"m{choose(np.arange(num_mult)[allowed_indices])}"
+        eq.extend([choose(ADD_SUB), m_new])  # add a new variable
+        c[idx][1] = eq
+        assert len(eq) <= 2 * num_mult - 1
         return c
 
 
@@ -323,6 +348,7 @@ def next_gen(population, percent_elite, percent_mutation, num_vars, num_mult):
     # the elite survive unchanged
     population_new = deepcopy(population[-nr_elite:])
 
+    # fittest are most likely to be selected
     selection_probabilities = (np.arange(population_size) + 1) / (
         population_size * (population_size + 1) / 2
     )
@@ -340,17 +366,32 @@ def next_gen(population, percent_elite, percent_mutation, num_vars, num_mult):
     return population_new
 
 
-def population_fitness(population, cref):
+def work(individual, cref, beta):
+    return fitness(individual["m"], individual["c"], cref, beta)
+
+
+def population_fitness(population, cref, beta):
     population_size = len(population)
 
     ftnss = np.zeros((population_size, len(population[0]["c"])))
     num_mults = np.zeros(population_size, dtype=int)
     scores = np.zeros(population_size)
-    for i, individual in enumerate(tqdm(population, ncols=50)):
-        ftnss_i, num_mult_i, score_i = fitness(individual["m"], individual["c"], cref)
+
+    for i, individual in enumerate(population):
+        ftnss_i, num_mult_i, score_i = fitness(
+            individual["m"], individual["c"], cref, beta
+        )
         ftnss[i, :] = ftnss_i
         num_mults[i] = num_mult_i
         scores[i] = score_i
+
+    # worker = partial(work, cref=cref, beta=beta)
+    # with ProcessPoolExecutor() as ex:
+    #     results = list(ex.map(worker, population))
+    # for i, result in enumerate(results):
+    #     ftnss[i, :] = result[0]
+    #     num_mults[i] = result[1]
+    #     scores[i] = result[2]
     return ftnss, np.sum(ftnss, axis=1) / len(cref), num_mults, scores
 
 
@@ -368,17 +409,20 @@ def sort_by(by, population, num_mults):
     )
 
 
-def stats(scores, num_mults, pm):
+def stats(scores, num_mults, sum_fitness, pm):
     """
     Compute some statistics.
     """
     scores = np.array(scores)
 
-    pm["min"].append(np.min(scores))
-    pm["10%"].append(np.quantile(scores, 0.1))
-    pm["mean"].append(np.mean(scores))
-    pm["90%"].append(np.quantile(scores, 0.9))
-    pm["max"].append(np.max(scores))
+    pm["score min"].append(np.min(scores))
+    pm["score 10%"].append(np.quantile(scores, 0.1))
+    pm["score mean"].append(np.mean(scores))
+    pm["score 90%"].append(np.quantile(scores, 0.9))
+    pm["score max"].append(np.max(scores))
+
+    # the best individuals' sum_fitness
+    pm["sum_fitness"].append([f"{x:.2f}" for x in sum_fitness[-3:]])
 
     # the best individuals' numbers of Mult nodes
     pm["num_mult"].append(num_mults[-3:])

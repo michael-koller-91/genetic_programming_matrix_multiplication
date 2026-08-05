@@ -1,3 +1,4 @@
+from tqdm import tqdm
 import datetime as dt
 import genetics
 import numpy as np
@@ -11,16 +12,19 @@ def run(args):
 
     seed = np.random.randint(10_000_000, 100_000_000)
     np.random.default_rng(seed)
+    print("seed =", seed)
 
+    beta = 2**-2
     dim = 2
-    generations = 100
+    generations = 500
     num_mult = dim**3
     num_vars = dim**2
-    percent_elite = 5
-    percent_mutation = 5
-    population_size = 50
+    percent_elite = 5  # 100 - percent_elite are generated through breeding
+    percent_mutation = 10  # chance that any offspring sees a mutation after breeding
+    population_size = 100
     print_percent = 5
 
+    print("beta =", beta)
     print("dim =", dim)
     print("generations =", generations)
     print("num_mult =", num_mult)
@@ -44,11 +48,12 @@ def run(args):
 
     perf_metrics = {
         "generation": list(),
-        "min": list(),
-        "10%": list(),
-        "mean": list(),
-        "90%": list(),
-        "max": list(),
+        "score min": list(),
+        "score 10%": list(),
+        "score mean": list(),
+        "score 90%": list(),
+        "score max": list(),
+        "sum_fitness": list(),
         "num_mult": list(),
         "mean(time_per_generation [s])": list(),
     }
@@ -56,18 +61,23 @@ def run(args):
     cref = genetics.gen_mat_equations(dim)[1]
 
     population = genetics.population_init(population_size, num_mult, num_vars)
-    _, _, num_mults, scores = genetics.population_fitness(population, cref)
+    _, sum_fitness, num_mults, scores = genetics.population_fitness(
+        population, cref, beta
+    )
 
-    scores, population, num_mults, _ = genetics.sort_by(scores, population, num_mults)
+    scores, population, num_mults, idx_sorted = genetics.sort_by(
+        scores, population, num_mults
+    )
+    sum_fitness = sum_fitness[idx_sorted]
     perf_metrics["mean(time_per_generation [s])"].append(0)
     perf_metrics["generation"].append(0)
-    perf_metrics = genetics.stats(scores, num_mults, perf_metrics)
+    perf_metrics = genetics.stats(scores, num_mults, sum_fitness, perf_metrics)
     print(pd.DataFrame(perf_metrics))
 
     tic_tot = time.time()
     time_tot = 0
     appended_to_file = False
-    for i in range(1, generations + 1):
+    for i in tqdm(range(1, generations + 1)):
         tic = time.time()
         population = genetics.next_gen(
             population,
@@ -76,15 +86,21 @@ def run(args):
             num_vars=num_vars,
             num_mult=num_mult,
         )
-        _, _, num_mults, scores = genetics.population_fitness(population, cref)
-        scores, population, num_mults, _ = genetics.sort_by(
+        # t0 = time.time()
+        _, sum_fitness, num_mults, scores = genetics.population_fitness(
+            population, cref, beta
+        )
+        # t1 = time.time()
+        # tqdm.write(f"population_fitness(): {t1 - t0:.2f}")
+        scores, population, num_mults, idx_sorted = genetics.sort_by(
             scores, population, num_mults
         )
+        sum_fitness = sum_fitness[idx_sorted]
         time_tot += time.time() - tic
 
         if i % int(np.ceil(print_percent / 100 * generations)) == 0:
             perf_metrics["generation"].append(i)
-            perf_metrics = genetics.stats(scores, num_mults, perf_metrics)
+            perf_metrics = genetics.stats(scores, num_mults, sum_fitness, perf_metrics)
 
             mean_t = time_tot / i
             perf_metrics["mean(time_per_generation [s])"].append(mean_t)
