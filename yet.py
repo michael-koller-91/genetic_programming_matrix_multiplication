@@ -1,8 +1,27 @@
+# flake8: noqa E203
+from tqdm import tqdm
+import datetime as dt
+import numba
 import numpy as np
+import os
+import pandas as pd
+import time
 
 DTYPE = np.int32
+NJIT_ON = True  # set to False to disable numba.njit
 
 
+def njit(f):
+    def decorate(f):
+        if NJIT_ON:
+            return numba.njit(cache=True)(f)
+        else:
+            return f
+
+    return decorate(f)
+
+
+@njit
 def crossover(eq_weights, fitness, n_children, rng):
     n_eq = eq_weights.shape[1]
 
@@ -52,6 +71,42 @@ def test_crossover():
         assert children.shape == (n_ch, n_eq, n_mul)
 
 
+@njit
+def fitness(u, v, w, ref_mat, alpha=0.5):
+    uv = outer_products(u, v)
+    wuv = weighted_sums(w, uv)
+
+    diff = np.abs(wuv - ref_mat).astype(np.float64)
+    diff_n = diff.shape[0]
+    sum_terms = diff.reshape(diff_n, -1).sum(axis=1)
+
+    sum_mult = np.sum(np.abs(w), axis=1)
+    num_mult = np.count_nonzero(sum_mult, axis=1).astype(np.float64)
+
+    score = alpha / (sum_terms + 1) + (1 - alpha) / (num_mult + 1)
+    return score, num_mult
+
+
+def test_fitness():
+    n = 1_000
+    for dim in [2, 3, 4]:
+        n_eq = dim**2
+        n_mul = dim**3 - 1
+        n_var = dim**2
+
+        u = np.random.randint(-1, 2, (n, n_mul, n_var), dtype=DTYPE)
+        v = np.random.randint(-1, 2, (n, n_mul, n_var), dtype=DTYPE)
+        w = np.random.randint(-1, 2, (n, n_eq, n_mul), dtype=DTYPE)
+
+        ref_mat = ref_matrices(dim, DTYPE)
+
+        score, num_mult = fitness(u, v, w, ref_mat)
+
+        assert score.shape == (n,)
+        assert num_mult.shape == (n,)
+
+
+@njit
 def mutate(arr, p, rng):
     # select random entries
     mask = rng.random(arr.shape) < p
@@ -59,13 +114,13 @@ def mutate(arr, p, rng):
     # map {-1, 0, 1} -> {0, 1, 2}
     v = arr + 1
 
-    bit = rng.integers(0, 2, size=arr.shape, dtype=arr.dtype)  # 0 or 1
+    bit = rng.integers(0, 2, size=arr.shape)  # , dtype=arr.dtype)  # 0 or 1
 
     # change value and map back to {-1, 0, 1}
     replacement = ((v + 1 + bit) % 3) - 1  # + 1 to ensure the value is changed
-    arr[mask] = replacement[mask]
-
-    return arr
+    # arr[mask] = replacement[mask]
+    # return arr
+    return np.where(mask, replacement, arr)
 
 
 def test_mutate():
@@ -92,6 +147,7 @@ def test_mutate():
         assert u_mut.max() <= 1
 
 
+@njit
 def outer_products(u, v):
     return u[..., :, None] * v[..., None, :]
 
@@ -115,6 +171,105 @@ def test_outer_products():
         assert np.allclose(uv, uv_ref)
 
 
+def ref_matrices(d, dtype=DTYPE):
+    dd = d**2
+    mat = np.zeros((dd, dd, dd), dtype=dtype)
+    k = -1
+    for i in range(d):
+        for j in range(d):
+            k += 1
+            mat[k] = ref_matrix(d, i, j, dtype=dtype)
+    return mat
+
+
+def ref_matrix(d, row, col, dtype=DTYPE):
+    """
+    Return an (d^2 x d^2) matrix C such that:
+        vecA @ C @ vecB == (A @ B)[i, ell]
+    where vecA and vecB are vectorizations of A and B.
+    """
+    assert 0 <= row < d
+    assert 0 <= col < d
+
+    C = np.zeros((d**2, d**2), dtype=dtype)
+    for k in range(d):
+        # flat index of A[i,k]
+        u = row * d + k  # A_{row, k}
+        v = k * d + col  # B_{k, col}
+        C[u, v] = 1
+    return C
+
+
+def test_ref_matrices():
+    mat_ref = np.zeros((4, 4, 4), dtype=DTYPE)
+    # c0 = a0 * b0 + a1 * b2
+    mat_ref[0, :, :] = np.array(
+        [
+            [1, 0, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+        ]
+    )
+    # c1 = a0 * b1 + a1 * b3
+    mat_ref[1, :, :] = np.array(
+        [
+            [0, 1, 0, 0],
+            [0, 0, 0, 1],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+        ]
+    )
+    # c2 = a2 * b0 + a3 * b2
+    mat_ref[2, :, :] = np.array(
+        [
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+            [1, 0, 0, 0],
+            [0, 0, 1, 0],
+        ]
+    )
+    # c3 = a2 * b1 + a3 * b3
+    mat_ref[3, :, :] = np.array(
+        [
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 0, 1],
+        ]
+    )
+
+    mat = ref_matrices(2, DTYPE)
+
+    assert np.count_nonzero(mat - mat_ref) == 0
+
+
+@njit
+def sort(score, u, v, w):
+    idxsort = np.argsort(score)[::-1]
+    u = u[idxsort]
+    v = v[idxsort]
+    w = w[idxsort]
+    return u, v, w
+
+
+def stats(score, num_mult, pm):
+    """
+    Compute some statistics.
+    """
+    pm["score min"].append(np.min(score))
+    pm["score 10%"].append(np.quantile(score, 0.1))
+    pm["score mean"].append(np.mean(score))
+    pm["score 90%"].append(np.quantile(score, 0.9))
+    pm["score max"].append(np.max(score))
+
+    # the best individuals' numbers of multiplications
+    pm["num_mult"].append(num_mult[-3:])
+
+    return pm
+
+
+@njit
 def weighted_sums(w, uv):
     return (w[:, :, :, None, None] * uv[:, None, :, :, :]).sum(axis=2)
 
@@ -140,12 +295,179 @@ def test_weighted_sums():
         assert np.allclose(wuv, wuv_ref)
 
 
-def main():
+@njit
+def run_generations(
+    u,
+    v,
+    w,
+    p_mut,
+    ref_mat,
+    alpha,
+    num_elite,
+    num_crossover,
+    num_selection,
+    num_generations,
+    rng,
+):
+    for _ in range(num_generations):
+        score, num_mult = fitness(u, v, w, ref_mat, alpha)
+
+        u, v, w = sort(score, u, v, w)
+
+        # the elite survive unchanged
+        w_new = w.copy()
+
+        # crossover for most children
+        w_new[num_elite : num_elite + num_crossover] = crossover(
+            w, score, num_crossover, rng
+        )
+
+        # random selection for the rest
+        idx = np.arange(u.shape[0])
+        rng.shuffle(idx)
+        w_new[num_elite + num_crossover :] = w[idx[:num_selection]]
+
+        w = w_new.copy()
+
+        u[num_elite:] = mutate(u[num_elite:], p_mut, rng)
+        v[num_elite:] = mutate(v[num_elite:], p_mut, rng)
+        w[num_elite:] = mutate(w[num_elite:], p_mut, rng)
+
+    score, num_mult = fitness(u, v, w, ref_mat, alpha)
+
+    u, v, w = sort(score, u, v, w)
+
+    return u, v, w, score, num_mult
+
+
+def run(args):
+    os.makedirs("results", exist_ok=True)
+
+    seed = np.random.randint(10_000_000, 100_000_000)
+    rng = np.random.default_rng(seed)
+    print("seed =", seed)
+
+    alpha = 2**-1  # smaller alpha <=> fewer multiplications
+    dim = 2
+    generations = 1000
+    percent_elite = 5  # this percent of fittest individuals survive unchanged
+    percent_print = 5
+    percent_selection = (
+        10  # this percent of children are generated via random selection
+    )
+    population_size = 10000
+
+    print("alpha =", alpha)
+    print("dim =", dim)
+    print("generations =", generations)
+    print("percent_elite =", percent_elite)
+    print("percent_print =", percent_print)
+    print("percent_selection =", percent_selection)
+    print("population_size =", population_size)
+
+    date = dt.datetime.strftime(dt.datetime.now(), "%Y-%M-%d_%Hh%Mm%Ss")
+    filename = os.path.join("results", date + ".txt")
+    print("filename:", filename)
+
+    if not args.noresult:
+        with open(filename, "w") as f:
+            f.write(f"alpha = {alpha}")
+            f.write(f"dim = {dim}")
+            f.write(f"generations = {generations}")
+            f.write(f"percent_elite = {percent_elite}")
+            f.write(f"percent_selection = {percent_selection}")
+            f.write(f"population_size = {population_size}")
+            f.write(f"print_percent = {percent_print}")
+
+    perf = {
+        "generation": [0],
+        "score min": list(),
+        "score 10%": list(),
+        "score mean": list(),
+        "score 90%": list(),
+        "score max": list(),
+        # "sum_fitness": list(),
+        "num_mult": list(),
+        "mean(time_per_generation [s])": [0],
+    }
+
+    num_elite = int(np.ceil(population_size * percent_elite / 100))
+    num_selection = int(np.ceil(population_size * percent_elite / 100))
+    num_crossover = population_size - num_elite - num_selection
+    p_mut = percent_selection / 100
+    ref_mat = ref_matrices(dim, dtype=DTYPE)
+
+    num_gen_per_loop = int(np.ceil(percent_print / 100 * generations))
+    print("num_gen_per_loop =", num_gen_per_loop)
+    loops = int(np.ceil(generations / num_gen_per_loop))
+
+    u = rng.integers(-1, 2, (population_size, dim**3 - 1, dim**2), dtype=DTYPE)
+    v = rng.integers(-1, 2, (population_size, dim**3 - 1, dim**2), dtype=DTYPE)
+    w = rng.integers(-1, 2, (population_size, dim**2, dim**3 - 1), dtype=DTYPE)
+
+    # numba compile
+    u, v, w, score, num_mult = run_generations(
+        u=u,
+        v=v,
+        w=w,
+        p_mut=p_mut,
+        ref_mat=ref_mat,
+        alpha=alpha,
+        num_elite=num_elite,
+        num_crossover=num_crossover,
+        num_selection=num_selection,
+        num_generations=1,
+        rng=rng,
+    )
+
+    perf = stats(score, num_mult, perf)
+    print(pd.DataFrame(perf))
+
+    tic_tot = time.time()
+    time_tot = 0
+    for i in tqdm(range(1, loops + 1)):
+        tic = time.time()
+
+        u, v, w, score, num_mult = run_generations(
+            u=u,
+            v=v,
+            w=w,
+            p_mut=p_mut,
+            ref_mat=ref_mat,
+            alpha=alpha,
+            num_elite=num_elite,
+            num_crossover=num_crossover,
+            num_selection=num_selection,
+            num_generations=num_gen_per_loop,
+            rng=rng,
+        )
+
+        time_tot += time.time() - tic
+        perf["generation"].append(i)
+        perf = stats(score, num_mult, perf)
+
+        mean_t = time_tot / (i * num_gen_per_loop)
+        perf["mean(time_per_generation [s])"].append(mean_t)
+
+        tqdm.write("")
+        tqdm.write(pd.DataFrame(perf).to_string())
+    print(f"Total runtime: {(time.time() - tic_tot) / 60:.2f} minutes.")
+
+
+def t_e_s_t():
     # test_crossover()
-    test_mutate()
+    test_fitness()
+    # test_mutate()
     # test_outer_products()
+    # test_ref_matrices()
     # test_weighted_sums()
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--noresult", action="store_true")
+    args = parser.parse_args()
+
+    run(args)
