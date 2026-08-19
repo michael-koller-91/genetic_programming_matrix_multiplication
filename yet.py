@@ -8,7 +8,7 @@ import pandas as pd
 import time
 
 DTYPE = np.int32
-NJIT_ON = True  # set to False to disable numba.njit
+NJIT_ON = False  # set to False to disable numba.njit
 
 
 def njit(f):
@@ -83,8 +83,10 @@ def fitness(u, v, w, ref_mat, alpha=0.5):
     sum_mult = np.sum(np.abs(w), axis=1)
     num_mult = np.count_nonzero(sum_mult, axis=1).astype(np.float64)
 
-    score = alpha / (sum_terms + 1) + (1 - alpha) / (num_mult + 1)
-    return score, num_mult
+    term1 = 1 / (sum_terms + 1)
+    term2 = 1 / (num_mult + 1)
+    score = alpha * term1 + (1 - alpha) * term2
+    return score, num_mult, term1
 
 
 def test_fitness():
@@ -100,27 +102,34 @@ def test_fitness():
 
         ref_mat = ref_matrices(dim, DTYPE)
 
-        score, num_mult = fitness(u, v, w, ref_mat)
+        score, num_mult, sumterms = fitness(u, v, w, ref_mat)
 
         assert score.shape == (n,)
         assert num_mult.shape == (n,)
+        assert sumterms.shape == (n,)
 
 
 @njit
 def mutate(arr, p, rng):
-    # select random entries
-    mask = rng.random(arr.shape) < p
-
-    # map {-1, 0, 1} -> {0, 1, 2}
-    v = arr + 1
-
+    mask = rng.random(arr.shape) < p  # select random entries
+    v = arr + 1  # map {-1, 0, 1} -> {0, 1, 2}
     bit = rng.integers(0, 2, size=arr.shape)  # , dtype=arr.dtype)  # 0 or 1
 
     # change value and map back to {-1, 0, 1}
     replacement = ((v + 1 + bit) % 3) - 1  # + 1 to ensure the value is changed
-    # arr[mask] = replacement[mask]
-    # return arr
-    return np.where(mask, replacement, arr)
+    out = np.where(mask, replacement, arr)
+
+    # enforce: for every (i, j, :) vector, at least one entry is nonzero
+    bad = ~np.any(out != 0, axis=-1)  # shape (arr.shape[0], arr.shape[1])
+    if np.any(bad):
+        i_idx, j_idx = np.where(bad)  # indices for the bad (i, j)
+        pos = rng.integers(
+            0, arr.shape[-1], size=i_idx.size
+        )  # which of the vector slots to activate
+        sign = rng.choice(np.array([-1, 1], dtype=out.dtype), size=i_idx.size)
+        out[i_idx, j_idx, pos] = sign
+
+    return out
 
 
 def test_mutate():
@@ -245,17 +254,21 @@ def test_ref_matrices():
 
 
 @njit
-def sort(score, u, v, w):
+def sort(score, u, v, w, num_mult, sumterms):
+    """Sort by `score` in descending order."""
     idxsort = np.argsort(score)[::-1]
     u = u[idxsort]
     v = v[idxsort]
     w = w[idxsort]
-    return u, v, w
+    score = score[idxsort]
+    num_mult = num_mult[idxsort]
+    sumterms = sumterms[idxsort]
+    return u, v, w, score, num_mult, sumterms
 
 
-def stats(score, num_mult, pm):
+def stats(score, num_mult, sumterms, pm):
     """
-    Compute some statistics.
+    Compute some statistics assuming arrays being sorted by descending score.
     """
     pm["score min"].append(np.min(score))
     pm["score 10%"].append(np.quantile(score, 0.1))
@@ -264,7 +277,9 @@ def stats(score, num_mult, pm):
     pm["score max"].append(np.max(score))
 
     # the best individuals' numbers of multiplications
-    pm["num_mult"].append(num_mult[-3:])
+    pm["num_mult"].append(num_mult[:3])
+
+    pm["sumterms"].append([f"{x:.2f}" for x in sumterms[:3]])
 
     return pm
 
@@ -305,22 +320,23 @@ def run_generations(
     alpha,
     num_elite,
     num_crossover,
+    num_mutation,
     num_selection,
     num_generations,
     rng,
 ):
     for _ in range(num_generations):
-        score, num_mult = fitness(u, v, w, ref_mat, alpha)
+        score, num_mult, sumterms = fitness(u, v, w, ref_mat, alpha)
 
-        u, v, w = sort(score, u, v, w)
+        u, v, w, score, num_mult, sumterms = sort(score, u, v, w, num_mult, sumterms)
 
         # the elite survive unchanged
         w_new = w.copy()
 
         # crossover for most children
-        w_new[num_elite : num_elite + num_crossover] = crossover(
-            w, score, num_crossover, rng
-        )
+        # w_new[num_elite : num_elite + num_crossover] = crossover(
+        #     w, score, num_crossover, rng
+        # )
 
         # random selection for the rest
         idx = np.arange(u.shape[0])
@@ -329,15 +345,18 @@ def run_generations(
 
         w = w_new.copy()
 
-        u[num_elite:] = mutate(u[num_elite:], p_mut, rng)
-        v[num_elite:] = mutate(v[num_elite:], p_mut, rng)
-        w[num_elite:] = mutate(w[num_elite:], p_mut, rng)
+        # mutate some of the children
+        idx = np.arange(num_elite, u.shape[0])  # don't mutate the elite
+        rng.shuffle(idx)
+        u[idx[:num_mutation]] = mutate(u[idx[:num_mutation]], p_mut, rng)
+        v[idx[:num_mutation]] = mutate(v[idx[:num_mutation]], p_mut, rng)
+        w[idx[:num_mutation]] = mutate(w[idx[:num_mutation]], p_mut, rng)
 
-    score, num_mult = fitness(u, v, w, ref_mat, alpha)
+    score, num_mult, sumterms = fitness(u, v, w, ref_mat, alpha)
 
-    u, v, w = sort(score, u, v, w)
+    u, v, w, score, num_mult, sumterms = sort(score, u, v, w, num_mult, sumterms)
 
-    return u, v, w, score, num_mult
+    return u, v, w, score, num_mult, sumterms
 
 
 def run(args):
@@ -347,23 +366,27 @@ def run(args):
     rng = np.random.default_rng(seed)
     print("seed =", seed)
 
-    alpha = 2**-1  # smaller alpha <=> fewer multiplications
+    alpha = 1  # smaller alpha <=> fewer multiplications
     dim = 2
     generations = 1000
     percent_elite = 5  # this percent of fittest individuals survive unchanged
+    percent_mutation = 5  # this percent of non-elite children individuals sees mutation
     percent_print = 5
     percent_selection = (
         10  # this percent of children are generated via random selection
     )
     population_size = 10000
+    p_mut = 0.1
 
     print("alpha =", alpha)
     print("dim =", dim)
     print("generations =", generations)
     print("percent_elite =", percent_elite)
+    print("percent_mutation =", percent_mutation)
     print("percent_print =", percent_print)
     print("percent_selection =", percent_selection)
     print("population_size =", population_size)
+    print("p_mut =", p_mut)
 
     date = dt.datetime.strftime(dt.datetime.now(), "%Y-%M-%d_%Hh%Mm%Ss")
     filename = os.path.join("results", date + ".txt")
@@ -375,9 +398,11 @@ def run(args):
             f.write(f"dim = {dim}")
             f.write(f"generations = {generations}")
             f.write(f"percent_elite = {percent_elite}")
+            f.write(f"percent_mutation = {percent_mutation}")
+            f.write(f"percent_print = {percent_print}")
             f.write(f"percent_selection = {percent_selection}")
             f.write(f"population_size = {population_size}")
-            f.write(f"print_percent = {percent_print}")
+            f.write(f"p_mut = {p_mut}")
 
     perf = {
         "generation": [0],
@@ -386,15 +411,15 @@ def run(args):
         "score mean": list(),
         "score 90%": list(),
         "score max": list(),
-        # "sum_fitness": list(),
+        "sumterms": list(),
         "num_mult": list(),
         "mean(time_per_generation [s])": [0],
     }
 
     num_elite = int(np.ceil(population_size * percent_elite / 100))
-    num_selection = int(np.ceil(population_size * percent_elite / 100))
+    num_mutation = int(np.ceil(population_size * percent_mutation) / 100)
+    num_selection = int(np.ceil(population_size * percent_selection / 100))
     num_crossover = population_size - num_elite - num_selection
-    p_mut = percent_selection / 100
     ref_mat = ref_matrices(dim, dtype=DTYPE)
 
     num_gen_per_loop = int(np.ceil(percent_print / 100 * generations))
@@ -406,7 +431,7 @@ def run(args):
     w = rng.integers(-1, 2, (population_size, dim**2, dim**3 - 1), dtype=DTYPE)
 
     # numba compile
-    u, v, w, score, num_mult = run_generations(
+    u, v, w, score, num_mult, sumterms = run_generations(
         u=u,
         v=v,
         w=w,
@@ -415,12 +440,13 @@ def run(args):
         alpha=alpha,
         num_elite=num_elite,
         num_crossover=num_crossover,
+        num_mutation=num_mutation,
         num_selection=num_selection,
         num_generations=1,
         rng=rng,
     )
 
-    perf = stats(score, num_mult, perf)
+    perf = stats(score, num_mult, sumterms, perf)
     print(pd.DataFrame(perf))
 
     tic_tot = time.time()
@@ -428,7 +454,7 @@ def run(args):
     for i in tqdm(range(1, loops + 1)):
         tic = time.time()
 
-        u, v, w, score, num_mult = run_generations(
+        u, v, w, score, num_mult, sumterms = run_generations(
             u=u,
             v=v,
             w=w,
@@ -437,6 +463,7 @@ def run(args):
             alpha=alpha,
             num_elite=num_elite,
             num_crossover=num_crossover,
+            num_mutation=num_mutation,
             num_selection=num_selection,
             num_generations=num_gen_per_loop,
             rng=rng,
@@ -444,7 +471,7 @@ def run(args):
 
         time_tot += time.time() - tic
         perf["generation"].append(i)
-        perf = stats(score, num_mult, perf)
+        perf = stats(score, num_mult, sumterms, perf)
 
         mean_t = time_tot / (i * num_gen_per_loop)
         perf["mean(time_per_generation [s])"].append(mean_t)
