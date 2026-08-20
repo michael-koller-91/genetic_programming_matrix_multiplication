@@ -1,5 +1,6 @@
 black
 ipython
+numba
 numpy
 pandas
 sympy
