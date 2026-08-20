@@ -16,12 +16,12 @@ def run(args):
 
     beta = 2**-2
     dim = 2
-    generations = 500
-    num_mult = dim**3
+    generations = 1000
+    num_mult = dim**3 - 1
     num_vars = dim**2
     percent_elite = 5  # 100 - percent_elite are generated through breeding
     percent_mutation = 10  # chance that any offspring sees a mutation after breeding
-    population_size = 100
+    population_size = 500
     print_percent = 5
 
     print("beta =", beta)
