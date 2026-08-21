@@ -22,6 +22,12 @@ def njit(f):
 
 
 @njit
+def count_multiplications(w):
+    w_abs_sum = np.sum(np.abs(w), axis=1)
+    return np.count_nonzero(w_abs_sum, axis=1).astype(np.float64)
+
+
+@njit
 def crossover(eq_weights, fitness, n_children, rng):
     n_eq = eq_weights.shape[1]
 
@@ -56,21 +62,43 @@ def crossover(eq_weights, fitness, n_children, rng):
 
 
 @njit
-def fitness(u, v, w, ref_mat, alpha=0.5):
+def fitness(u, v, w, ref_mat, alpha=1.0, beta=1.0, gamma=1.0):
+    """
+    Compute the fitness of each individual in the population.
+
+    Three loss terms are combined into a single score (higher is better):
+        l_alpha : number of indices where exactly one of wuv / ref_mat is nonzero
+        l_beta  : sum of |wuv - ref_mat| / (|ref_mat| + eps) over nonzero ref_mat
+        l_gamma : sum of |wuv| over zero ref_mat entries
+
+    Each term is weighted with its respective scalar and the weighted sum l_tot
+    of all terms is converted to a goodness value via exp(-l_tot).
+    """
     uv = outer_products(u, v)
     wuv = weighted_sums(w, uv)
 
-    diff = np.abs(wuv - ref_mat).astype(np.float64)
-    diff_n = diff.shape[0]
-    sum_terms = diff.reshape(diff_n, -1).sum(axis=1)
+    wuv_abs = np.abs(wuv).astype(np.float64)
+    ref_abs = np.abs(ref_mat).astype(np.float64)
+    diff_abs = np.abs(wuv - ref_mat).astype(np.float64)
 
-    sum_mult = np.sum(np.abs(w), axis=1)
-    num_mult = np.count_nonzero(sum_mult, axis=1).astype(np.float64)
+    # L_alpha: count indices where exactly one of wuv or ref_mat is nonzero
+    mismatch = (wuv != 0) != (ref_mat != 0)
+    l_alpha = mismatch.reshape(mismatch.shape[0], -1).sum(axis=1).astype(np.float64)
 
-    term1 = 1 / (sum_terms + 1)
-    term2 = 1 / (num_mult + 1)
-    score = alpha * term1 + (1 - alpha) * term2
-    return score, num_mult, term1
+    # L_beta: |wuv - ref_mat| / (|ref_mat| + eps) over nonzero ref_mat indices
+    eps = 1e-12
+    beta_term = np.where(ref_mat != 0, diff_abs / (ref_abs + eps), 0.0)
+    l_beta = beta_term.reshape(beta_term.shape[0], -1).sum(axis=1)
+
+    # L_gamma: |wuv| over zero ref_mat indices
+    gamma_term = np.where(ref_mat == 0, wuv_abs, 0.0)
+    l_gamma = gamma_term.reshape(gamma_term.shape[0], -1).sum(axis=1)
+
+    # combine into a "higher is better" score (reciprocal form, like the original)
+    l_tot = alpha * l_alpha + beta * l_beta + gamma * l_gamma
+    score = np.exp(-l_tot)
+
+    return score, l_alpha, l_beta, l_gamma
 
 
 @njit
@@ -131,32 +159,28 @@ def ref_matrix(d, row, col, dtype=DTYPE):
 
 
 @njit
-def sort(score, u, v, w, num_mult, sumterms):
+def sort(score):
     """Sort by `score` in descending order."""
-    idxsort = np.argsort(score)[::-1]
-    u = u[idxsort]
-    v = v[idxsort]
-    w = w[idxsort]
-    score = score[idxsort]
-    num_mult = num_mult[idxsort]
-    sumterms = sumterms[idxsort]
-    return u, v, w, score, num_mult, sumterms
+    idx_score = np.argsort(score)[::-1]
+    return score[idx_score], idx_score
 
 
-def stats(score, num_mult, sumterms, pm):
+def stats(score, l_alpha, l_beta, l_gamma, num_mult, pm):
     """
     Compute some statistics assuming arrays being sorted by descending score.
     """
-    pm["score min"].append(np.min(score))
-    pm["score 10%"].append(np.quantile(score, 0.1))
-    pm["score mean"].append(np.mean(score))
-    pm["score 90%"].append(np.quantile(score, 0.9))
-    pm["score max"].append(np.max(score))
+    pm["score min"].append(f"{np.min(score):.2e}")
+    pm["score 10%"].append(f"{np.quantile(score, 0.1):.2e}")
+    pm["score mean"].append(f"{np.mean(score):.2e}")
+    pm["score 90%"].append(f"{np.quantile(score, 0.9):.2e}")
+    pm["score max"].append(f"{np.max(score):.2e}")
 
     # the best individuals' numbers of multiplications
     pm["num_mult"].append(num_mult[:3])
 
-    pm["sumterms"].append([f"{x:.2f}" for x in sumterms[:3]])
+    pm["l_alpha"].append([f"{x:.2f}" for x in l_alpha[:3]])
+    pm["l_beta"].append([f"{x:.2f}" for x in l_beta[:3]])
+    pm["l_gamma"].append([f"{x:.2f}" for x in l_gamma[:3]])
 
     return pm
 
@@ -172,8 +196,12 @@ def run_generations(
     v,
     w,
     p_mut,
+    # for fitness
     ref_mat,
     alpha,
+    beta,
+    gamma,
+    #
     num_elite,
     num_crossover,
     num_mutation,
@@ -182,9 +210,15 @@ def run_generations(
     rng,
 ):
     for _ in range(num_generations):
-        score, num_mult, sumterms = fitness(u, v, w, ref_mat, alpha)
+        score, l_alpha, l_beta, l_gamma = fitness(u, v, w, ref_mat, alpha, beta, gamma)
 
-        u, v, w, score, num_mult, sumterms = sort(score, u, v, w, num_mult, sumterms)
+        score, idx_score = sort(score)
+        u = u[idx_score]
+        v = v[idx_score]
+        w = w[idx_score]
+        l_alpha = l_alpha[idx_score]
+        l_beta = l_beta[idx_score]
+        l_gamma = l_gamma[idx_score]
 
         # the elite survive unchanged
         w_new = w.copy()
@@ -208,11 +242,17 @@ def run_generations(
         v[idx[:num_mutation]] = mutate(v[idx[:num_mutation]], p_mut, rng)
         w[idx[:num_mutation]] = mutate(w[idx[:num_mutation]], p_mut, rng)
 
-    score, num_mult, sumterms = fitness(u, v, w, ref_mat, alpha)
+    score, l_alpha, l_beta, l_gamma = fitness(u, v, w, ref_mat, alpha, beta, gamma)
 
-    u, v, w, score, num_mult, sumterms = sort(score, u, v, w, num_mult, sumterms)
+    score, idx_score = sort(score)
+    u = u[idx_score]
+    v = v[idx_score]
+    w = w[idx_score]
+    l_alpha = l_alpha[idx_score]
+    l_beta = l_beta[idx_score]
+    l_gamma = l_gamma[idx_score]
 
-    return u, v, w, score, num_mult, sumterms
+    return u, v, w, score, l_alpha, l_beta, l_gamma
 
 
 def run(args):
@@ -222,7 +262,10 @@ def run(args):
     rng = np.random.default_rng(seed)
     print("seed =", seed)
 
-    alpha = 1  # smaller alpha <=> fewer multiplications
+    alpha = 1  # smaller alpha <=>
+    beta = 1  # smaller alpha <=>
+    gamma = 1  # smaller alpha <=>
+
     dim = 2
     generations = 1000
     percent_elite = 5  # this percent of fittest individuals survive unchanged
@@ -235,6 +278,8 @@ def run(args):
     p_mut = 0.1
 
     print("alpha =", alpha)
+    print("beta =", beta)
+    print("gamma =", gamma)
     print("dim =", dim)
     print("generations =", generations)
     print("percent_elite =", percent_elite)
@@ -251,6 +296,8 @@ def run(args):
     if not args.noresult:
         with open(filename, "w") as f:
             f.write(f"alpha = {alpha}")
+            f.write(f"beta = {beta}")
+            f.write(f"gamma = {gamma}")
             f.write(f"dim = {dim}")
             f.write(f"generations = {generations}")
             f.write(f"percent_elite = {percent_elite}")
@@ -267,9 +314,11 @@ def run(args):
         "score mean": list(),
         "score 90%": list(),
         "score max": list(),
-        "sumterms": list(),
+        "l_alpha": list(),
+        "l_beta": list(),
+        "l_gamma": list(),
         "num_mult": list(),
-        "mean(time_per_generation [s])": [0],
+        "mean(time/gen [s])": [0],
     }
 
     num_elite = int(np.ceil(population_size * percent_elite / 100))
@@ -287,13 +336,15 @@ def run(args):
     w = rng.integers(-1, 2, (population_size, dim**2, dim**3 - 1), dtype=DTYPE)
 
     # numba compile
-    u, v, w, score, num_mult, sumterms = run_generations(
+    u, v, w, score, l_alpha, l_beta, l_gamma = run_generations(
         u=u,
         v=v,
         w=w,
         p_mut=p_mut,
         ref_mat=ref_mat,
         alpha=alpha,
+        beta=beta,
+        gamma=gamma,
         num_elite=num_elite,
         num_crossover=num_crossover,
         num_mutation=num_mutation,
@@ -301,8 +352,9 @@ def run(args):
         num_generations=1,
         rng=rng,
     )
+    num_mult = count_multiplications(w)
 
-    perf = stats(score, num_mult, sumterms, perf)
+    perf = stats(score, l_alpha, l_beta, l_gamma, num_mult, perf)
     print(pd.DataFrame(perf))
 
     tic_tot = time.time()
@@ -310,13 +362,15 @@ def run(args):
     for i in tqdm(range(1, loops + 1)):
         tic = time.time()
 
-        u, v, w, score, num_mult, sumterms = run_generations(
+        u, v, w, score, l_alpha, l_beta, l_gamma = run_generations(
             u=u,
             v=v,
             w=w,
             p_mut=p_mut,
             ref_mat=ref_mat,
             alpha=alpha,
+            beta=beta,
+            gamma=gamma,
             num_elite=num_elite,
             num_crossover=num_crossover,
             num_mutation=num_mutation,
@@ -324,13 +378,14 @@ def run(args):
             num_generations=num_gen_per_loop,
             rng=rng,
         )
+        num_mult = count_multiplications(w)
 
         time_tot += time.time() - tic
         perf["generation"].append(i)
-        perf = stats(score, num_mult, sumterms, perf)
+        perf = stats(score, l_alpha, l_beta, l_gamma, num_mult, perf)
 
         mean_t = time_tot / (i * num_gen_per_loop)
-        perf["mean(time_per_generation [s])"].append(mean_t)
+        perf["mean(time/gen [s])"].append(mean_t)
 
         tqdm.write("")
         tqdm.write(pd.DataFrame(perf).to_string())
