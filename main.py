@@ -224,9 +224,9 @@ def run_generations(
         w_new = w.copy()
 
         # crossover for most children
-        # w_new[num_elite : num_elite + num_crossover] = crossover(
-        #     w, score, num_crossover, rng
-        # )
+        w_new[num_elite : num_elite + num_crossover] = crossover(
+            w, score, num_crossover, rng
+        )
 
         # random selection for the rest
         idx = np.arange(u.shape[0])
@@ -268,7 +268,7 @@ def run(args):
 
     dim = 2
     generations = 1000
-    percent_elite = 5  # this percent of fittest individuals survive unchanged
+    percent_elite = 3  # this percent of fittest individuals survive unchanged
     percent_mutation = 5  # this percent of non-elite children individuals sees mutation
     percent_print = 5
     percent_selection = (
