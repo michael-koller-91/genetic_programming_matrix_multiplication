@@ -40,11 +40,12 @@ def test_fitness():
 
         ref_mat = ref_matrices(dim, DTYPE)
 
-        score, num_mult, sumterms = fitness(u, v, w, ref_mat)
+        score, l_alpha, l_beta, l_gamma = fitness(u, v, w, ref_mat)
 
         assert score.shape == (n,)
-        assert num_mult.shape == (n,)
-        assert sumterms.shape == (n,)
+        assert l_alpha.shape == (n,)
+        assert l_beta.shape == (n,)
+        assert l_gamma.shape == (n,)
 
 
 def test_mutate():
