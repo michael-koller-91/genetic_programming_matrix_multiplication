@@ -62,6 +62,26 @@ def crossover(eq_weights, fitness, n_children, rng):
 
 
 @njit
+def evaluate(u, v, w, ref_mat, alpha, beta, gamma):
+    """Compute fitness and sort the population by descending score.
+
+    Returns the sorted score and losses together with the reordered
+    u, v, w arrays.
+    """
+    score, l_alpha, l_beta, l_gamma = fitness(u, v, w, ref_mat, alpha, beta, gamma)
+
+    score, idx_score = sort(score)
+    u = u[idx_score]
+    v = v[idx_score]
+    w = w[idx_score]
+    l_alpha = l_alpha[idx_score]
+    l_beta = l_beta[idx_score]
+    l_gamma = l_gamma[idx_score]
+
+    return score, l_alpha, l_beta, l_gamma, u, v, w
+
+
+@njit
 def fitness(u, v, w, ref_mat, alpha=1.0, beta=1.0, gamma=1.0):
     """
     Compute the fitness of each individual in the population.
@@ -210,15 +230,9 @@ def run_generations(
     rng,
 ):
     for _ in range(num_generations):
-        score, l_alpha, l_beta, l_gamma = fitness(u, v, w, ref_mat, alpha, beta, gamma)
-
-        score, idx_score = sort(score)
-        u = u[idx_score]
-        v = v[idx_score]
-        w = w[idx_score]
-        l_alpha = l_alpha[idx_score]
-        l_beta = l_beta[idx_score]
-        l_gamma = l_gamma[idx_score]
+        score, l_alpha, l_beta, l_gamma, u, v, w = evaluate(
+            u, v, w, ref_mat, alpha, beta, gamma
+        )
 
         # the elite survive unchanged
         w_new = w.copy()
@@ -242,15 +256,9 @@ def run_generations(
         v[idx[:num_mutation]] = mutate(v[idx[:num_mutation]], p_mut, rng)
         w[idx[:num_mutation]] = mutate(w[idx[:num_mutation]], p_mut, rng)
 
-    score, l_alpha, l_beta, l_gamma = fitness(u, v, w, ref_mat, alpha, beta, gamma)
-
-    score, idx_score = sort(score)
-    u = u[idx_score]
-    v = v[idx_score]
-    w = w[idx_score]
-    l_alpha = l_alpha[idx_score]
-    l_beta = l_beta[idx_score]
-    l_gamma = l_gamma[idx_score]
+    score, l_alpha, l_beta, l_gamma, u, v, w = evaluate(
+        u, v, w, ref_mat, alpha, beta, gamma
+    )
 
     return u, v, w, score, l_alpha, l_beta, l_gamma
 
